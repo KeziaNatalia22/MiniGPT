@@ -42,7 +42,7 @@ Install & Run (Windows PowerShell)
 1) Backend
 
 ```powershell
-cd "e:/File Kezia/latihan/mini AI/backend"
+cd "C:/Users/project/backend"
 npm install
 # create .env using the example, then:
 npm run dev
@@ -51,7 +51,7 @@ npm run dev
 2) Frontend
 
 ```powershell
-cd "e:/File Kezia/latihan/mini AI/frontend"
+cd "C:/Users/project/frontend"
 npm install
 npm run dev
 ```
@@ -68,7 +68,7 @@ You can run both dev servers (frontend Vite and backend Express) from the projec
 1) Install dependencies for both projects and the root helper:
 
 ```powershell
-cd "e:/File Kezia/latihan/mini AI"
+cd "C:/Users/project"
 npm install
 npm run install:all
 ```
@@ -76,17 +76,10 @@ npm run install:all
 2) Start frontend and backend together:
 
 ```powershell
-cd "e:/File Kezia/latihan/mini AI"
+cd "C:/Users/project"
 npm run dev
 ```
 
 This runs `backend` and `frontend` `dev` scripts in parallel (root `package.json` uses `concurrently`).
 
-Security
-
-- Keep `GEMINI_API_KEY` in the backend `.env`. Do not commit your `.env` to version control.
-
-If you want, I can:
-- Add streaming via Server-Sent Events (SSE) or WebSockets.
-- Replace the REST call with the official Google Node SDK (if you prefer that client).
 
