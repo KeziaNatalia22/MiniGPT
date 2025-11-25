@@ -1,8 +1,11 @@
-export async function sendPrompt(text: string): Promise<string> {
+export async function sendPrompt(text: string, roomId?: string | number): Promise<string> {
+  const body: any = { text }
+  if (roomId) body.roomId = roomId
+
   const resp = await fetch('/api/ai', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text })
+    body: JSON.stringify(body),
   })
 
   if (!resp.ok) {

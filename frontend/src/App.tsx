@@ -1,12 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { sendPrompt } from './api/aiClient'
+import roomsApi, { Message as ApiMessage } from './api/roomsClient'
 import markdownToHtml from './utils/markdown'
 import RoomList from './components/RoomList'
 
-type Message = { id: string; role: 'user' | 'ai'; text: string }
-type Room = { id: string; title: string; messages: Message[] }
-
-const STORAGE_KEY = 'mini-ai:rooms:v1'
+type Message = { id: string | number; role: 'user' | 'ai'; text: string; createdAt?: string }
+type Room = { id: string | number; title: string }
 
 function uid() {
   return String(Date.now()) + Math.random().toString(36).slice(2, 8)
@@ -15,7 +14,8 @@ function uid() {
 export default function App() {
   const [input, setInput] = useState('')
   const [rooms, setRooms] = useState<Room[]>([])
-  const [activeRoomId, setActiveRoomId] = useState<string | undefined>(undefined)
+  const [activeRoomId, setActiveRoomId] = useState<string | number | undefined>(undefined)
+  const [messages, setMessages] = useState<Message[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [dark, setDark] = useState(false)
@@ -23,34 +23,62 @@ export default function App() {
   const listRef = useRef<HTMLDivElement | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 
-  // load rooms from localStorage
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY)
-      if (raw) {
-        const parsed = JSON.parse(raw) as Room[]
-        setRooms(parsed)
-        setActiveRoomId(parsed[0]?.id)
-        return
-      }
-    } catch (e) {
-      console.error('Failed to load rooms', e)
-    }
+    document.documentElement.style.setProperty('--bg', dark ? '#0b0b0d' : '#f9f9f9')
+    document.documentElement.style.setProperty('--header-bg', dark ? '#1f1f23' : '#343541')
+  }, [dark])
 
-    // init with a default room
-    const first: Room = { id: uid(), title: 'New chat', messages: [] }
-    setRooms([first])
-    setActiveRoomId(first.id)
+  // load rooms from backend
+  useEffect(() => {
+    let mounted = true
+    async function load() {
+      try {
+        const rs = await roomsApi.listRooms()
+        if (!mounted) return
+        if (rs.length === 0) {
+          const newr = await roomsApi.createRoom('New chat')
+          setRooms([newr])
+          setActiveRoomId(newr.id)
+        } else {
+          setRooms(rs)
+          setActiveRoomId(rs[0].id)
+        }
+      } catch (e: any) {
+        console.error('Failed to load rooms', e)
+        setError('Failed to load rooms')
+      }
+    }
+    load()
+    return () => { mounted = false }
   }, [])
 
-  // persist rooms
+  // (no SSE) -- real-time update removed; frontend will rely on API polling or manual refresh
+
+  // load messages whenever active room changes
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(rooms))
-    } catch (e) {
-      console.error('Failed to persist rooms', e)
-    }
-  }, [rooms])
+    if (!activeRoomId) return
+    let mounted = true
+    setMessages([])
+    ;(async () => {
+      try {
+        const msgs = (await roomsApi.getMessages(activeRoomId)) as ApiMessage[]
+        if (!mounted) return
+        setMessages(msgs.map((m) => ({ id: m.id, role: m.role, text: m.text, createdAt: m.createdAt })))
+      } catch (e: any) {
+        console.error('Failed to load messages', e)
+        // If the room was removed server-side, remove it locally and pick another active room
+        if (e && typeof e.status === 'number' && e.status === 404) {
+          setRooms((prev) => prev.filter((r) => String(r.id) !== String(activeRoomId)))
+          const remaining = rooms.filter((r) => String(r.id) !== String(activeRoomId))
+          setActiveRoomId(remaining[0]?.id)
+          setError(null)
+        } else {
+          setError('Failed to load messages')
+        }
+      }
+    })()
+    return () => { mounted = false }
+  }, [activeRoomId])
 
   useEffect(() => {
     // Auto-scroll to bottom smoothly when messages change
@@ -60,17 +88,40 @@ export default function App() {
         el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
       })
     }
-  }, [rooms, loading, activeRoomId])
+  }, [messages, loading])
 
-  useEffect(() => {
-    document.documentElement.style.setProperty('--bg', dark ? '#0b0b0d' : '#f9f9f9')
-    document.documentElement.style.setProperty('--header-bg', dark ? '#1f1f23' : '#343541')
-  }, [dark])
+  const createRoom = async () => {
+    try {
+      const r = await roomsApi.createRoom('New chat')
+      setRooms((p) => [r, ...p])
+      setActiveRoomId(r.id)
+    } catch (e: any) {
+      console.error('createRoom error', e)
+      setError('Failed to create room')
+    }
+  }
 
-  const activeRoom = rooms.find((r) => r.id === activeRoomId) || rooms[0]
+  const deleteRoom = async (id: string | number) => {
+    try {
+      await roomsApi.deleteRoom(id)
+      setRooms((p) => p.filter((r) => r.id !== id))
+      if (String(activeRoomId) === String(id)) {
+        setActiveRoomId(rooms.find((r) => String(r.id) !== String(id))?.id)
+      }
+    } catch (e: any) {
+      console.error('deleteRoom error', e)
+      setError('Failed to delete room')
+    }
+  }
 
-  const upsertRoomMessages = (roomId: string, fn: (m: Message[]) => Message[]) => {
-    setRooms((prev) => prev.map((r) => (r.id === roomId ? { ...r, messages: fn(r.messages) } : r)))
+  const renameRoom = async (id: string | number, title: string) => {
+    try {
+      const r = await roomsApi.renameRoom(id, title)
+      setRooms((p) => p.map((x) => (String(x.id) === String(id) ? r : x)))
+    } catch (e: any) {
+      console.error('renameRoom error', e)
+      setError('Failed to rename room')
+    }
   }
 
   const submit = async () => {
@@ -78,19 +129,19 @@ export default function App() {
     if (!activeRoomId) return
     const text = input.trim()
     const userMsg: Message = { id: uid(), role: 'user', text }
-    upsertRoomMessages(activeRoomId, (m) => [...m, userMsg])
+    setMessages((m) => [...m, userMsg])
     setInput('')
     autoResizeTextarea()
     setLoading(true)
     setError(null)
 
     try {
-      const res = await sendPrompt(text)
+      const res = await sendPrompt(text, activeRoomId)
 
       // Create an empty AI message and then type it out progressively
       const aiId = uid()
       const initialAiMsg: Message = { id: aiId, role: 'ai', text: '' }
-      upsertRoomMessages(activeRoomId, (m) => [...m, initialAiMsg])
+      setMessages((m) => [...m, initialAiMsg])
 
       // Typewriter effect: append characters over time
       await new Promise<void>((resolve) => {
@@ -102,15 +153,21 @@ export default function App() {
 
         const timer = setInterval(() => {
           i++
-          upsertRoomMessages(activeRoomId, (prevMsgs) =>
-            prevMsgs.map((msg) => (msg.id === aiId ? { ...msg, text: res.slice(0, i) } : msg))
-          )
+          setMessages((prevMsgs) => prevMsgs.map((msg) => (msg.id === aiId ? { ...msg, text: res.slice(0, i) } : msg)))
           if (i >= len) {
             clearInterval(timer)
             resolve()
           }
         }, delay)
       })
+
+      // Optionally refresh messages from server to ensure persisted data
+      try {
+        const msgs = (await roomsApi.getMessages(activeRoomId)) as ApiMessage[]
+        setMessages(msgs.map((m) => ({ id: m.id, role: m.role, text: m.text, createdAt: m.createdAt })))
+      } catch (e) {
+        // ignore refresh errors
+      }
     } catch (err: any) {
       console.error(err)
       setError(err?.message || 'Request failed')
@@ -136,34 +193,16 @@ export default function App() {
 
   useEffect(() => { autoResizeTextarea() }, [input])
 
-  const createRoom = () => {
-    const r: Room = { id: uid(), title: 'New chat', messages: [] }
-    setRooms((p) => [r, ...p])
-    setActiveRoomId(r.id)
-  }
-
-  const deleteRoom = (id: string) => {
-    setRooms((p) => p.filter((r) => r.id !== id))
-    if (activeRoomId === id) {
-      const remaining = rooms.filter((r) => r.id !== id)
-      setActiveRoomId(remaining[0]?.id)
-    }
-  }
-
-  const renameRoom = (id: string, title: string) => {
-    setRooms((p) => p.map((r) => (r.id === id ? { ...r, title } : r)))
-  }
-
   return (
     <div className={`app-root ${dark ? 'dark' : ''}`}>
       <div className="chat-container">
         <RoomList
-          rooms={rooms.map((r) => ({ id: r.id, title: r.title }))}
-          activeId={activeRoomId}
+          rooms={rooms.map((r) => ({ id: String(r.id), title: r.title }))}
+          activeId={String(activeRoomId ?? '')}
           onSelect={(id) => setActiveRoomId(id)}
           onCreate={createRoom}
-          onDelete={deleteRoom}
-          onRename={renameRoom}
+          onDelete={(id) => deleteRoom(id)}
+          onRename={(id, title) => renameRoom(id, title)}
         />
 
         <div className="main-panel">
@@ -171,17 +210,17 @@ export default function App() {
             <button className="mode-toggle" onClick={() => setDark((d) => !d)} aria-label="Toggle dark mode">
               {dark ? 'Light' : 'Dark'}
             </button>
-            <div className="header-title">{activeRoom?.title ?? 'Chat'}</div>
+            <div className="header-title">{rooms.find((r) => String(r.id) === String(activeRoomId))?.title ?? 'Chat'}</div>
             <div style={{ width: 56 }} />
           </header>
 
           <div className="messages" ref={listRef}>
-            {(!activeRoom || activeRoom.messages.length === 0) && (
+            {messages.length === 0 && (
               <div className="empty">Start the conversation — ask anything.</div>
             )}
 
-            {(activeRoom?.messages || []).map((m) => (
-              <div key={m.id} className={`message-row ${m.role === 'user' ? 'user' : 'ai'}`}>
+            {messages.map((m) => (
+              <div key={String(m.id)} className={`message-row ${m.role === 'user' ? 'user' : 'ai'}`}>
                 <div className={`bubble ${m.role === 'user' ? 'bubble-user' : 'bubble-ai'}`}>
                   {m.role === 'ai' ? (
                     <div
@@ -229,3 +268,4 @@ export default function App() {
     </div>
   )
 }
+
