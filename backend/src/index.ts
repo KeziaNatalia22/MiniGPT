@@ -1,9 +1,10 @@
+import dotenv from 'dotenv';
+// Load environment variables as early as possible so other modules can read them
+dotenv.config();
+
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import aiRoute from './routes/ai';
-
-dotenv.config();
 
 const app = express();
 app.use(cors());

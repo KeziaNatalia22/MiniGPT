@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { sendPrompt } from './api/aiClient'
+import markdownToHtml from './utils/markdown'
 
 type Message = { id: string; role: 'user' | 'ai'; text: string }
 
@@ -40,8 +41,33 @@ export default function App() {
 
     try {
       const res = await sendPrompt(text)
-      const aiMsg: Message = { id: String(Date.now() + 1), role: 'ai', text: res }
-      setMessages((m) => [...m, aiMsg])
+
+      // Create an empty AI message and then type it out progressively
+      const aiId = String(Date.now() + 1)
+      const initialAiMsg: Message = { id: aiId, role: 'ai', text: '' }
+      setMessages((m) => [...m, initialAiMsg])
+
+      // Typewriter effect: append characters over time
+      await new Promise<void>((resolve) => {
+        if (!res || res.length === 0) return resolve()
+        let i = 0
+        const len = res.length
+
+        // adapt speed slightly based on message length
+        const baseDelay = 12 // ms per char
+        const delay = Math.max(6, Math.min(40, Math.floor(baseDelay)))
+
+        const timer = setInterval(() => {
+          i++
+          setMessages((prev) =>
+            prev.map((msg) => (msg.id === aiId ? { ...msg, text: res.slice(0, i) } : msg))
+          )
+          if (i >= len) {
+            clearInterval(timer)
+            resolve()
+          }
+        }, delay)
+      })
     } catch (err: any) {
       console.error(err)
       setError(err?.message || 'Request failed')
@@ -86,7 +112,15 @@ export default function App() {
           {messages.map((m) => (
             <div key={m.id} className={`message-row ${m.role === 'user' ? 'user' : 'ai'}`}>
               <div className={`bubble ${m.role === 'user' ? 'bubble-user' : 'bubble-ai'}`}>
-                <div className="bubble-text">{m.text}</div>
+                {/* Render markdown for AI responses; keep user messages as plain text to avoid surprises */}
+                {m.role === 'ai' ? (
+                  <div
+                    className="bubble-text"
+                    dangerouslySetInnerHTML={{ __html: markdownToHtml(m.text) }}
+                  />
+                ) : (
+                  <div className="bubble-text">{m.text}</div>
+                )}
               </div>
             </div>
           ))}
