@@ -104,9 +104,19 @@ export default function App() {
   const deleteRoom = async (id: string | number) => {
     try {
       await roomsApi.deleteRoom(id)
-      setRooms((p) => p.filter((r) => r.id !== id))
-      if (String(activeRoomId) === String(id)) {
-        setActiveRoomId(rooms.find((r) => String(r.id) !== String(id))?.id)
+      // After deletion, fetch fresh rooms from server to keep UI in sync
+      try {
+        const rs = await roomsApi.listRooms()
+        setRooms(rs)
+        if (String(activeRoomId) === String(id)) {
+          setActiveRoomId(rs[0]?.id)
+        }
+      } catch (err) {
+        // fallback to local removal if list fetch fails
+        setRooms((p) => p.filter((r) => r.id !== id))
+        if (String(activeRoomId) === String(id)) {
+          setActiveRoomId(rooms.find((r) => String(r.id) !== String(id))?.id)
+        }
       }
     } catch (e: any) {
       console.error('deleteRoom error', e)
