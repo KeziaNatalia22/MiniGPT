@@ -36,7 +36,7 @@ export default function App() {
         const rs = await roomsApi.listRooms()
         if (!mounted) return
         if (rs.length === 0) {
-          const newr = await roomsApi.createRoom('New chat')
+          const newr = await roomsApi.createRoom('New chat Front 1')
           setRooms([newr])
           setActiveRoomId(newr.id)
         } else {
